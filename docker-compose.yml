@@ -6,10 +6,14 @@ services:
       dockerfile: Dockerfile
     image: meshobserv:latest
     restart: unless-stopped
+    volumes:
+      - meshobserv_data:/data
     environment:
       - MQTT_BROKER=mthub.monteops.com:1883
       - MQTT_USERNAME=meshdev
       - MQTT_PASSWORD=large4cats
+      - DB_PATH=/data/db/meshobserv.duckdb
+      - RETENTION_DAYS=360
     depends_on:
       - mqtt
     command: ["/meshobserv"]
@@ -51,3 +55,4 @@ services:
 volumes:
   coverage_cache:
   mosquitto_data:
+  meshobserv_data:
