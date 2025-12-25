@@ -138,6 +138,7 @@ func (c *MQTTClient) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 		// data must be (probably) encrypted
 		encrypted := packet.GetEncrypted()
 		if encrypted == nil {
+			log.Printf("[info] message from %d on %s has no decoded or encrypted payload", from, topic)
 			return
 		}
 		// decrypt
@@ -149,10 +150,12 @@ func (c *MQTTClient) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 		// parse Data
 		data = new(generated.Data)
 		if err := proto.Unmarshal(decrypted, data); err != nil {
+			log.Printf("[info] failed to decrypt/unmarshal payload from %d on %s: %v", from, topic, err)
 			// ignore, probably encrypted with other psk
 			return
 		}
 	}
+	log.Printf("[info] decoded message from %d on %s port=%s", from, topic, data.GetPortnum().String())
 	c.MessageHandler(from, topic, data.GetPortnum(), data.GetPayload())
 }
 
@@ -176,14 +179,16 @@ func (c *MQTTClient) handleJSONMessage(topic string, payload []byte) bool {
 		topic = "msh/" + jm.Channel
 	}
 
+	payloadMap := flattenPayload(jm.Payload)
+
 	makePosition := func() ([]byte, bool) {
-		lat, okLat := asInt32(jm.Payload["latitude_i"])
-		lon, okLon := asInt32(jm.Payload["longitude_i"])
+		lat, okLat := asInt32(payloadMap["latitude_i"])
+		lon, okLon := asInt32(payloadMap["longitude_i"])
 		if !okLat || !okLon || (lat == 0 && lon == 0) {
 			return nil, false
 		}
-		alt, _ := asInt32(jm.Payload["altitude"])
-		prec, _ := asUint32(jm.Payload["precision_bits"])
+		alt, _ := asInt32(payloadMap["altitude"])
+		prec, _ := asUint32(payloadMap["precision_bits"])
 		pos := &generated.Position{
 			LatitudeI:     ptrInt32(lat),
 			LongitudeI:    ptrInt32(lon),
@@ -199,8 +204,8 @@ func (c *MQTTClient) handleJSONMessage(topic string, payload []byte) bool {
 	}
 
 	makeUser := func() ([]byte, bool) {
-		longName, _ := jm.Payload["long_name"].(string)
-		shortName, _ := jm.Payload["short_name"].(string)
+		longName, _ := payloadMap["long_name"].(string)
+		shortName, _ := payloadMap["short_name"].(string)
 		if longName == "" && shortName == "" {
 			return nil, false
 		}
@@ -217,12 +222,12 @@ func (c *MQTTClient) handleJSONMessage(topic string, payload []byte) bool {
 	}
 
 	makeMapReport := func() ([]byte, bool) {
-		longName, _ := jm.Payload["long_name"].(string)
-		shortName, _ := jm.Payload["short_name"].(string)
-		lat, latOk := asInt32(jm.Payload["latitude_i"])
-		lon, lonOk := asInt32(jm.Payload["longitude_i"])
-		alt, _ := asInt32(jm.Payload["altitude"])
-		prec, _ := asUint32(jm.Payload["position_precision"])
+		longName, _ := payloadMap["long_name"].(string)
+		shortName, _ := payloadMap["short_name"].(string)
+		lat, latOk := asInt32(payloadMap["latitude_i"])
+		lon, lonOk := asInt32(payloadMap["longitude_i"])
+		alt, _ := asInt32(payloadMap["altitude"])
+		prec, _ := asUint32(payloadMap["position_precision"])
 		if (latOk && lonOk) && (lat != 0 || lon != 0) {
 			mr := &generated.MapReport{
 				LongName:          longName,
@@ -253,9 +258,14 @@ func (c *MQTTClient) handleJSONMessage(topic string, payload []byte) bool {
 			c.MessageHandler(jm.From, topic, generated.PortNum_NODEINFO_APP, data)
 			return true
 		}
-	case "mapreport":
+	case "mapreport", "map_report":
 		if data, ok := makeMapReport(); ok {
 			c.MessageHandler(jm.From, topic, generated.PortNum_MAP_REPORT_APP, data)
+			return true
+		}
+	case "neighborinfo", "neighbor_info", "neighbor":
+		if data, ok := makeNeighborInfo(jm.From, payloadMap); ok {
+			c.MessageHandler(jm.From, topic, generated.PortNum_NEIGHBORINFO_APP, data)
 			return true
 		}
 	}
@@ -320,6 +330,94 @@ func asUint32(v interface{}) (uint32, bool) {
 
 func ptrInt32(v int32) *int32 {
 	return &v
+}
+
+func flattenPayload(p map[string]interface{}) map[string]interface{} {
+	if p == nil {
+		return map[string]interface{}{}
+	}
+	flat := make(map[string]interface{}, len(p))
+	for k, v := range p {
+		flat[k] = v
+	}
+	// handle nested position or map_report keys
+	if posRaw, ok := p["position"]; ok {
+		if pm, ok := posRaw.(map[string]interface{}); ok {
+			for k, v := range pm {
+				flat[k] = v
+			}
+		}
+	}
+	if mrRaw, ok := p["map_report"]; ok {
+		if mm, ok := mrRaw.(map[string]interface{}); ok {
+			for k, v := range mm {
+				flat[k] = v
+			}
+		}
+	}
+	if userRaw, ok := p["user"]; ok {
+		if um, ok := userRaw.(map[string]interface{}); ok {
+			for k, v := range um {
+				flat[k] = v
+			}
+		}
+	}
+	return flat
+}
+
+func makeNeighborInfo(from uint32, payload map[string]interface{}) ([]byte, bool) {
+	var neighbors []*generated.Neighbor
+	if arr, ok := payload["neighbors"].([]interface{}); ok {
+		for _, n := range arr {
+			if m, ok := n.(map[string]interface{}); ok {
+				id, okID := asUint32(m["node_id"])
+				snr := asFloat32(m["snr"])
+				if okID && id != 0 {
+					neighbors = append(neighbors, &generated.Neighbor{
+						NodeId: id,
+						Snr:    snr,
+					})
+				}
+			}
+		}
+	}
+	lastSent, _ := asUint32(payload["last_sent_by_id"])
+	bcast, _ := asUint32(payload["node_broadcast_interval_secs"])
+	if len(neighbors) == 0 && lastSent == 0 && bcast == 0 {
+		return nil, false
+	}
+	info := &generated.NeighborInfo{
+		NodeId:                    from,
+		LastSentById:              lastSent,
+		NodeBroadcastIntervalSecs: bcast,
+		Neighbors:                 neighbors,
+	}
+	b, err := proto.Marshal(info)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func asFloat32(v interface{}) float32 {
+	switch n := v.(type) {
+	case float64:
+		return float32(n)
+	case float32:
+		return n
+	case int:
+		return float32(n)
+	case int32:
+		return float32(n)
+	case int64:
+		return float32(n)
+	case uint32:
+		return float32(n)
+	case uint64:
+		return float32(n)
+	default:
+		return 0
+	}
 }
 
 func init() {
