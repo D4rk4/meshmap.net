@@ -13,6 +13,7 @@ import (
 
 	"github.com/D4rk4/meshmap.net/meshobserv/internal/meshtastic/generated"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -99,8 +100,11 @@ func (c *MQTTClient) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 	// parse ServiceEnvelope
 	var envelope generated.ServiceEnvelope
 	if err := proto.Unmarshal(msg.Payload(), &envelope); err != nil {
-		// ignore non-Meshtastic payloads
-		return
+		// try JSON-encoded envelope
+		if err := protojson.Unmarshal(msg.Payload(), &envelope); err != nil {
+			// ignore non-Meshtastic payloads
+			return
+		}
 	}
 	// get MeshPacket
 	packet := envelope.GetPacket()
