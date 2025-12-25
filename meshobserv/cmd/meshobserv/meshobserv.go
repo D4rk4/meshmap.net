@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -190,18 +192,10 @@ func handleMessage(from uint32, topic string, portNum generated.PortNum, payload
 }
 
 func main() {
-	var dbPath, blockedPath string
-	flag.StringVar(&dbPath, "f", "", "node database `file`")
+	var blockedPath, httpAddr string
 	flag.StringVar(&blockedPath, "b", "", "node blocklist `file`")
+	flag.StringVar(&httpAddr, "http", ":80", "HTTP listen address for serving nodes.json and health")
 	flag.Parse()
-	// load or make NodeDB
-	if len(dbPath) > 0 {
-		err := Nodes.LoadFile(dbPath)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Fatalf("[fatal] load nodes: %v", err)
-		}
-		log.Printf("[info] loaded %v nodes from disk", len(Nodes))
-	}
 	if Nodes == nil {
 		Nodes = make(meshtastic.NodeDB)
 	}
@@ -274,18 +268,32 @@ func main() {
 			time.Sleep(PruneWriteInterval)
 			NodesMutex.Lock()
 			Nodes.Prune(NodeExpiration, NeighborExpiration, MetricsExpiration, NodeExpiration)
-			if len(dbPath) > 0 {
-				valid := Nodes.GetValid()
-				err := valid.WriteFile(dbPath)
-				if err != nil {
-					log.Fatalf("[fatal] write nodes: %v", err)
-				}
-				log.Printf("[info] wrote %v nodes to disk", len(valid))
-			}
 			NodesMutex.Unlock()
 			if !Receiving.CompareAndSwap(true, false) {
 				log.Fatal("[fatal] no messages received")
 			}
+		}
+	}()
+	// serve nodes.json over HTTP
+	mux := http.NewServeMux()
+	mux.HandleFunc("/nodes.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		NodesMutex.Lock()
+		valid := Nodes.GetValid()
+		NodesMutex.Unlock()
+		if err := json.NewEncoder(w).Encode(valid); err != nil {
+			http.Error(w, "encode error", http.StatusInternalServerError)
+		}
+	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	go func() {
+		log.Printf("[http] listening on %s", httpAddr)
+		err := http.ListenAndServe(httpAddr, mux)
+		if err != nil {
+			log.Fatalf("[fatal] http listen: %v", err)
 		}
 	}()
 	// wait until exit
