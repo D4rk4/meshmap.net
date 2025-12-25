@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/brianshea2/meshmap.net/internal/meshtastic/generated"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -42,8 +43,14 @@ type MQTTClient struct {
 func (c *MQTTClient) Connect() error {
 	randomId := make([]byte, 4)
 	rand.Read(randomId)
+	broker := os.Getenv("MQTT_BROKER")
+	if broker == "" {
+		broker = "tcp://mqtt.meshtastic.org:1883"
+	} else if !strings.Contains(broker, "://") {
+		broker = "tcp://" + broker
+	}
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker("tcp://mqtt.meshtastic.org:1883")
+	opts.AddBroker(broker)
 	opts.SetClientID(fmt.Sprintf("meshobserv-%x", randomId))
 	opts.SetUsername("meshdev")
 	opts.SetPassword("large4cats")

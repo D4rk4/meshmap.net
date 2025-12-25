@@ -1,11 +1,22 @@
-FROM golang:latest AS build
+FROM golang:1.24 AS build
 WORKDIR /build
-COPY go.mod ./
-COPY cmd/meshobserv ./
-COPY internal ./internal/
-RUN go mod tidy
-RUN go build -v -o meshobserv
 
-FROM debian:trixie-slim
-COPY --from=build /build/meshobserv /usr/bin/
-ENTRYPOINT ["/usr/bin/meshobserv"]
+COPY . .
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends protobuf-compiler git ca-certificates && \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    git clone --depth 1 https://github.com/meshtastic/protobufs.git /tmp/protobufs && \
+    rm -rf /build/internal/meshtastic/generated && \
+    protoc \
+      -I=/tmp/protobufs \
+      -I=/usr/include \
+      --go_out=/build/internal/meshtastic \
+      --go_opt=module=github.com/meshtastic/go \
+      /tmp/protobufs/nanopb.proto \
+      /tmp/protobufs/meshtastic/*.proto
+RUN go mod download
+RUN CGO_ENABLED=0 GOOS=linux go build -v -trimpath -ldflags="-s -w" -o meshobserv ./cmd/meshobserv
+
+FROM scratch
+COPY --from=build /build/meshobserv /meshobserv
+ENTRYPOINT ["/meshobserv"]
