@@ -112,7 +112,7 @@ func (node *Node) IsValid() bool {
 	if len(node.SeenBy) == 0 {
 		return false
 	}
-	if len(node.LongName) == 0 {
+	if len(node.LongName) == 0 && len(node.ShortName) == 0 {
 		return false
 	}
 	if node.Latitude == 0 && node.Longitude == 0 {
@@ -224,6 +224,9 @@ func (node *Node) UpdateSeenBy(topic string) {
 }
 
 func (node *Node) UpdateUser(longName, shortName, hwModel, role string) {
+	if longName == "" && shortName != "" {
+		longName = shortName
+	}
 	node.LongName = longName
 	node.ShortName = shortName
 	node.HwModel = hwModel
