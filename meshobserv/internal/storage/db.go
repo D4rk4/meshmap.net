@@ -168,9 +168,13 @@ ON CONFLICT (node_id, neighbor_id) DO UPDATE SET snr=excluded.snr, updated=exclu
 
 func (db *DB) Prune() error {
 	cutoff := time.Now().Add(-db.retention)
-	_, err := db.conn.Exec(`DELETE FROM neighbors WHERE updated < ?;
-DELETE FROM nodes WHERE last_seen < ?;`, cutoff, cutoff)
-	return err
+	if _, err := db.conn.Exec(`DELETE FROM neighbors WHERE updated < ?`, cutoff); err != nil {
+		return err
+	}
+	if _, err := db.conn.Exec(`DELETE FROM nodes WHERE last_seen < ?`, cutoff); err != nil {
+		return err
+	}
+	return nil
 }
 
 type NodeRow struct {
