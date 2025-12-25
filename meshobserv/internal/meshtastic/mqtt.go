@@ -101,8 +101,9 @@ func (c *MQTTClient) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 	// parse ServiceEnvelope
 	var envelope generated.ServiceEnvelope
 	if err := proto.Unmarshal(msg.Payload(), &envelope); err != nil {
-		// try JSON-encoded envelope
-		if err := protojson.Unmarshal(msg.Payload(), &envelope); err != nil {
+		// try JSON-encoded envelope (discard unknown fields like "channel")
+		opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+		if err := opts.Unmarshal(msg.Payload(), &envelope); err != nil {
 			// try raw JSON message format
 			if !c.handleJSONMessage(topic, msg.Payload()) {
 				log.Printf("[info] ignoring non-Meshtastic payload on %s: %v", topic, err)
