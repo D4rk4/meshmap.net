@@ -1,4 +1,4 @@
-module github.com/brianshea2/meshmap.net/meshobserv
+module github.com/D4rk4/meshmap.net/meshobserv
 
 go 1.22
 

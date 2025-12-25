@@ -1,4 +1,4 @@
-module github.com/brianshea2/meshmap.net/coverage
+module github.com/D4rk4/meshmap.net/coverage
 
 go 1.24.0
 

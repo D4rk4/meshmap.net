@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/brianshea2/meshmap.net/meshobserv/internal/meshtastic/generated"
+	"github.com/D4rk4/meshmap.net/meshobserv/internal/meshtastic/generated"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"google.golang.org/protobuf/proto"
 )

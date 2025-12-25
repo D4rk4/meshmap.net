@@ -1,2 +1,6 @@
 meshobserv/internal/meshtastic/generated/*
 CONTINUITY.md
+coverage/coverage
+coverage/elevation_cache.duckdb
+coverage/bin
+meshobserv/meshobserv

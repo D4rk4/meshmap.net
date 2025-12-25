@@ -13,7 +13,6 @@ services:
     depends_on:
       - mqtt
     command: ["/meshobserv"]
-
   coverage:
     build:
       context: ./coverage
@@ -28,7 +27,7 @@ services:
       - CACHE_DB_PATH=/cache/elevation_cache.duckdb
     depends_on:
       - meshobserv
-  mosquitto:
+  mqtt:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
@@ -36,13 +35,13 @@ services:
     volumes:
       - mosquitto_data:/mosquitto/data
       - ./configs/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-
   web:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - meshobserv
       - coverage
+      - mqtt
     ports:
       - "80:80"
     volumes:
