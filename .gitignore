@@ -1,4 +1,2 @@
-blocklist.txt
 meshobserv/internal/meshtastic/generated/*
-website/nodes.json
 CONTINUITY.md

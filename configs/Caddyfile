@@ -1,0 +1,19 @@
+:80 {
+    encode zstd gzip
+    root * /data/website
+    file_server
+
+    @nodes path /nodes.json
+    handle @nodes {
+        reverse_proxy meshobserv:80
+    }
+
+    @coverage path /coverage_points.geojson
+    handle @coverage {
+        reverse_proxy coverage:80
+    }
+
+    handle {
+        try_files {path} {path}/ /index.html
+    }
+}

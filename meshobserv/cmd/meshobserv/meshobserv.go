@@ -3,9 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"flag"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"

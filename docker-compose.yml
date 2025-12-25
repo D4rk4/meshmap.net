@@ -10,22 +10,46 @@ services:
       - MQTT_BROKER=mthub.monteops.com:1883
       - MQTT_USERNAME=meshdev
       - MQTT_PASSWORD=large4cats
+    depends_on:
+      - mqtt
     command: ["/meshobserv"]
 
+  coverage:
+    build:
+      context: ./coverage
+      dockerfile: Dockerfile
+    image: coverage:latest
+    restart: unless-stopped
+    volumes:
+      - coverage_cache:/cache
+    environment:
+      - NODES_URL=http://meshobserv/nodes.json
+      - COVERAGE_HTTP_ADDR=:80
+      - CACHE_DB_PATH=/cache/elevation_cache.duckdb
+    depends_on:
+      - meshobserv
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - ./configs/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
   web:
-    image: nginx:stable-alpine
+    image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - meshobserv
-    environment:
-      - NGINX_SERVER_NAME=mthub.monteops.com
-    command: >
-      /bin/sh -c 'NGINX_SERVER_NAME=$${NGINX_SERVER_NAME:-mthub.monteops.com};
-      export NGINX_SERVER_NAME;
-      envsubst "$$NGINX_SERVER_NAME" < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf;
-      exec nginx -g "daemon off;"'
+      - coverage
     ports:
       - "80:80"
     volumes:
       - ./website:/data/website:ro
-      - ./configs/nginx-http.conf.template:/etc/nginx/conf.d/default.conf.template:ro
+      - ./configs/Caddyfile:/etc/caddy/Caddyfile:ro
+    environment:
+      - CADDY_ADMIN=off
+volumes:
+  coverage_cache:
+  mosquitto_data:
