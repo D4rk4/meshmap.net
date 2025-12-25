@@ -33,6 +33,7 @@ var (
 	Nodes      meshtastic.NodeDB
 	NodesMutex sync.Mutex
 	Receiving  atomic.Bool
+	debug      bool
 )
 
 func handleMessage(from uint32, topic string, portNum generated.PortNum, payload []byte) {
@@ -193,6 +194,7 @@ func main() {
 	var blockedPath, httpAddr string
 	flag.StringVar(&blockedPath, "b", "", "node blocklist `file`")
 	flag.StringVar(&httpAddr, "http", ":80", "HTTP listen address for serving nodes.json and health")
+	flag.BoolVar(&debug, "debug", false, "enable verbose logging")
 	flag.Parse()
 	if Nodes == nil {
 		Nodes = make(meshtastic.NodeDB)
@@ -267,8 +269,8 @@ func main() {
 			NodesMutex.Lock()
 			Nodes.Prune(NodeExpiration, NeighborExpiration, MetricsExpiration, NodeExpiration)
 			NodesMutex.Unlock()
-			if !Receiving.CompareAndSwap(true, false) {
-				log.Fatal("[fatal] no messages received")
+			if debug && !Receiving.CompareAndSwap(true, false) {
+				log.Print("[warn] no messages received in the last interval")
 			}
 		}
 	}()
