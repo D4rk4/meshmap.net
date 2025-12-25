@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -102,8 +103,10 @@ func (c *MQTTClient) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 	if err := proto.Unmarshal(msg.Payload(), &envelope); err != nil {
 		// try JSON-encoded envelope
 		if err := protojson.Unmarshal(msg.Payload(), &envelope); err != nil {
-			log.Printf("[info] ignoring non-Meshtastic payload on %s: %v", topic, err)
-			// ignore non-Meshtastic payloads
+			// try raw JSON message format
+			if !c.handleJSONMessage(topic, msg.Payload()) {
+				log.Printf("[info] ignoring non-Meshtastic payload on %s: %v", topic, err)
+			}
 			return
 		}
 	}
@@ -124,6 +127,9 @@ func (c *MQTTClient) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 	// check sender
 	if c.Accept != nil && !c.Accept(from) {
 		return
+	}
+	if ch := strings.TrimSpace(envelope.GetChannelId()); ch != "" {
+		topic = "msh/" + ch
 	}
 	// get Data, try decoded first
 	data := packet.GetDecoded()
@@ -147,6 +153,172 @@ func (c *MQTTClient) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 		}
 	}
 	c.MessageHandler(from, topic, data.GetPortnum(), data.GetPayload())
+}
+
+type jsonMessage struct {
+	Channel string                 `json:"channel"`
+	From    uint32                 `json:"from"`
+	To      uint32                 `json:"to"`
+	Type    string                 `json:"type"`
+	Payload map[string]interface{} `json:"payload"`
+}
+
+func (c *MQTTClient) handleJSONMessage(topic string, payload []byte) bool {
+	var jm jsonMessage
+	if err := json.Unmarshal(payload, &jm); err != nil {
+		return false
+	}
+	if jm.From == 0 {
+		return false
+	}
+	if jm.Channel != "" {
+		topic = "msh/" + jm.Channel
+	}
+
+	makePosition := func() ([]byte, bool) {
+		lat, okLat := asInt32(jm.Payload["latitude_i"])
+		lon, okLon := asInt32(jm.Payload["longitude_i"])
+		if !okLat || !okLon || (lat == 0 && lon == 0) {
+			return nil, false
+		}
+		alt, _ := asInt32(jm.Payload["altitude"])
+		prec, _ := asUint32(jm.Payload["precision_bits"])
+		pos := &generated.Position{
+			LatitudeI:     ptrInt32(lat),
+			LongitudeI:    ptrInt32(lon),
+			Altitude:      ptrInt32(alt),
+			PrecisionBits: prec,
+		}
+		b, err := proto.Marshal(pos)
+		if err != nil {
+			log.Printf("[info] failed to marshal position from json on %s: %v", topic, err)
+			return nil, false
+		}
+		return b, true
+	}
+
+	makeUser := func() ([]byte, bool) {
+		longName, _ := jm.Payload["long_name"].(string)
+		shortName, _ := jm.Payload["short_name"].(string)
+		if longName == "" && shortName == "" {
+			return nil, false
+		}
+		user := &generated.User{
+			LongName:  longName,
+			ShortName: shortName,
+		}
+		b, err := proto.Marshal(user)
+		if err != nil {
+			log.Printf("[info] failed to marshal user from json on %s: %v", topic, err)
+			return nil, false
+		}
+		return b, true
+	}
+
+	makeMapReport := func() ([]byte, bool) {
+		longName, _ := jm.Payload["long_name"].(string)
+		shortName, _ := jm.Payload["short_name"].(string)
+		lat, latOk := asInt32(jm.Payload["latitude_i"])
+		lon, lonOk := asInt32(jm.Payload["longitude_i"])
+		alt, _ := asInt32(jm.Payload["altitude"])
+		prec, _ := asUint32(jm.Payload["position_precision"])
+		if (latOk && lonOk) && (lat != 0 || lon != 0) {
+			mr := &generated.MapReport{
+				LongName:          longName,
+				ShortName:         shortName,
+				LatitudeI:         lat,
+				LongitudeI:        lon,
+				Altitude:          alt,
+				PositionPrecision: prec,
+			}
+			b, err := proto.Marshal(mr)
+			if err != nil {
+				log.Printf("[info] failed to marshal mapreport from json on %s: %v", topic, err)
+				return nil, false
+			}
+			return b, true
+		}
+		return nil, false
+	}
+
+	switch strings.ToLower(jm.Type) {
+	case "position":
+		if data, ok := makePosition(); ok {
+			c.MessageHandler(jm.From, topic, generated.PortNum_POSITION_APP, data)
+			return true
+		}
+	case "nodeinfo":
+		if data, ok := makeUser(); ok {
+			c.MessageHandler(jm.From, topic, generated.PortNum_NODEINFO_APP, data)
+			return true
+		}
+	case "mapreport":
+		if data, ok := makeMapReport(); ok {
+			c.MessageHandler(jm.From, topic, generated.PortNum_MAP_REPORT_APP, data)
+			return true
+		}
+	}
+
+	// fallback: try mapreport if position data present
+	if data, ok := makeMapReport(); ok {
+		c.MessageHandler(jm.From, topic, generated.PortNum_MAP_REPORT_APP, data)
+		return true
+	}
+	if data, ok := makePosition(); ok {
+		c.MessageHandler(jm.From, topic, generated.PortNum_POSITION_APP, data)
+		return true
+	}
+	if data, ok := makeUser(); ok {
+		c.MessageHandler(jm.From, topic, generated.PortNum_NODEINFO_APP, data)
+		return true
+	}
+	return false
+}
+
+func asInt32(v interface{}) (int32, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int32(n), true
+	case float32:
+		return int32(n), true
+	case int:
+		return int32(n), true
+	case int32:
+		return n, true
+	case int64:
+		return int32(n), true
+	case uint32:
+		return int32(n), true
+	case uint64:
+		return int32(n), true
+	default:
+		return 0, false
+	}
+}
+
+func asUint32(v interface{}) (uint32, bool) {
+	switch n := v.(type) {
+	case float64:
+		return uint32(n), true
+	case float32:
+		return uint32(n), true
+	case int:
+		return uint32(n), true
+	case int32:
+		return uint32(n), true
+	case int64:
+		return uint32(n), true
+	case uint32:
+		return n, true
+	case uint64:
+		return uint32(n), true
+	default:
+		return 0, false
+	}
+}
+
+func ptrInt32(v int32) *int32 {
+	return &v
 }
 
 func init() {

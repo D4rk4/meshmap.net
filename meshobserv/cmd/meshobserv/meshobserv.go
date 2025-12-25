@@ -236,14 +236,6 @@ func main() {
 			if _, found := blocked[from]; found {
 				return false
 			}
-			v, _ := counters.LoadOrStore(from, new(uint32))
-			count := atomic.AddUint32(v.(*uint32), 1)
-			if count >= RateLimitCount {
-				if count%100 == 0 {
-					log.Printf("[info] node %v rate limited (%v messages)", from, count)
-				}
-				return false
-			}
 			return true
 		},
 		BlockCipher:    meshtastic.NewBlockCipher(meshtastic.DefaultKey),
