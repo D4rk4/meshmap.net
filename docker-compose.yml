@@ -47,8 +47,7 @@ services:
     volumes:
       - ./website:/data/website:ro
       - ./configs/Caddyfile:/etc/caddy/Caddyfile:ro
-    environment:
-      - CADDY_ADMIN=off
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--admin", "off"]
 volumes:
   coverage_cache:
   mosquitto_data:
