@@ -9,6 +9,7 @@ RUN apt-get update && \
     git clone --depth 1 https://github.com/meshtastic/protobufs.git /tmp/protobufs && \
     protoc \
       -I=/usr/local/include \
+      -I=/usr/include \
       -I=/tmp/protobufs \
       --go_out=/build/internal/meshtastic \
       --go_opt=module=github.com/meshtastic/go \
